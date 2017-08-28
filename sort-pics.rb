@@ -14,13 +14,14 @@ class PictureFile
 end
 
 class PicturesSort
-  attr_accessor :folder, :file_types
+  attr_accessor :folder, :file_types, :api_key
   @folderHash
   @picture_filesHash
 
-  def initialize(folder, file_types)
+  def initialize(folder, file_types, api_key)
     @folder = folder
     @file_types = file_types
+    @api_key = api_key
     @picture_filesHash = Hash.new{|hash, key| hash[key] = Hash.new}
   end
 
@@ -55,7 +56,7 @@ class PicturesSort
       firstFile = value[0]
       puts "fetching location for #{key}"
       begin
-        url =  "https://maps.googleapis.com/maps/api/geocode/json?latlng=#{@picture_filesHash[firstFile].lat},-#{@picture_filesHash[firstFile].lon}&key=AIzaSyCEBXf9rwYCgPEFPRDK1bg_6WsPphgxg3Q"
+        url =  "https://maps.googleapis.com/maps/api/geocode/json?latlng=#{@picture_filesHash[firstFile].lat},-#{@picture_filesHash[firstFile].lon}&key=#{@api_key}"
         #puts "url=#{url}"
         response = open(url)
         shortname = JSON.load(response)['results'][0]['address_components'][1]['short_name']
@@ -81,15 +82,16 @@ class PicturesSort
     picture_file
   end
 end
-#
-# all = Dir.glob("/Users/bpaul/Desktop/test-sort-pics/*{.JPG}")
 
-pic_sort = PicturesSort.new("/Users/bpaul/Desktop/testing/", "MOV,JPG,jpg,MP4,PNG,mp4")
-#  pic_sort = PicturesSort.new(".", "MOV")
-folderNameHash =  pic_sort.sort_files
-puts "folderNameHash = #{folderNameHash}"
-folder_util = FolderUtils.new
-folder_util.base_folder = "/Users/bpaul/Desktop/testing"
-folderNameHash.each do |key, value|
-  folder_util.create_folder_move_files(key, value)
+if ARGV.length == 2
+  pic_sort = PicturesSort.new(ARGV[0], "MOV,JPG,jpg,MP4,PNG,mp4", ARGV[1])
+  folderNameHash =  pic_sort.sort_files
+  puts "folderNameHash = #{folderNameHash}"
+  folder_util = FolderUtils.new
+  folder_util.base_folder = ARGV[0]
+  folderNameHash.each do |key, value|
+    folder_util.create_folder_move_files(key, value)
+  end
+else
+  puts "Please provide two argument to the program. sort-pics.rb /path/to/the/picutres/folder/ googleAPIKey"
 end
