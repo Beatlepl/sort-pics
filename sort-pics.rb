@@ -14,7 +14,7 @@ class PictureFile
 end
 
 class PicturesSort
-  attr_accessor :folder, :file_types, :api_key
+  attr_accessor :folder, :file_types, :api_key, :folderUtils, :known_locations
   @folderHash
   @picture_filesHash
 
@@ -23,8 +23,99 @@ class PicturesSort
     @file_types = file_types
     @api_key = api_key
     @picture_filesHash = Hash.new{|hash, key| hash[key] = Hash.new}
+    @folderUtils = FolderUtils.new
+    @folderUtils.base_folder = folder
+    @known_locations = JSON.parse(File.read("#{File.dirname(__FILE__)}/locations.json"))
   end
 
+  def sort_files_bylocation
+    folderHash = Hash.new {|h,k| h[k]=[]}
+    dateLatLonArrayHash = Hash.new {|h,k| h[k]=[]}
+    dateNoLocationArrayHash = Hash.new {|h,k| h[k]=[]}
+    Dir.chdir(@folder)
+    #path = "#{@folder}*{#{@file_types}}"
+    path = "*{#{@file_types}}"
+    all = Dir.glob(path)
+      all.each do |file|
+      excapedFile = file.gsub(/ /, '\ ')
+      begin
+        if picture_file = get_exif_data(excapedFile)
+          line =  "#{picture_file.name} = #{picture_file.lat},#{picture_file.lon},#{picture_file.created_on}"
+          puts line
+          File.write("#{@folder}output.log", line+"\n", File.size("#{@folder}output.log"), mode: 'a')
+          if picture_file.lat == -1
+            dateNoLocationArrayHash[picture_file.created_on.strftime("%B%d-%Y")] << picture_file.name.shellescape
+          else
+            folderHash["#{sprintf('%.2f',picture_file.lat)},#{sprintf('%.2f',picture_file.lon)}"] << file.shellescape
+            dateLatLonArrayHash[picture_file.created_on.strftime("%B%d-%Y")] << "#{sprintf('%.2f',picture_file.lat)},#{sprintf('%.2f',picture_file.lon)}"
+          end
+        end
+      rescue
+        puts "Exception here for the file #{picture_file.name}"
+        File.write("#{@folder}output.log", "Exception for file: #{picture_file.name}", File.size("#{@folder}output.log"), mode: 'a')
+      end
+    end
+    move_nolocation_file(dateLatLonArrayHash, dateNoLocationArrayHash, folderHash )
+    get_location_file_hash(folderHash)
+  end
+
+  def move_nolocation_file(dateLatLonArrayHash, dateNoLocationArrayHash, folderHash)
+    #Find the location where max photos taken in a given date
+    dateLatLonArrayHash.each do |date, latlon_arr|
+      uniq_lat_lon_arr = latlon_arr.uniq
+      max_latlon = ""
+      max_latlon_cnt = 0
+      uniq_lat_lon_arr.each do |uniq_lat_lon|
+        if latlon_arr.count(uniq_lat_lon) >= max_latlon_cnt
+          max_latlon_cnt = latlon_arr.count(uniq_lat_lon)
+          max_latlon = uniq_lat_lon
+        end
+      end
+      dateLatLonArrayHash[date] = max_latlon
+    end
+
+
+    # move the no loc pics to its correct hash
+    dateNoLocationArrayHash.each do |date, no_loc_array|
+      if dateLatLonArrayHash[date].size  > 0
+        folderHash[dateLatLonArrayHash[date]] << no_loc_array
+        folderHash[dateLatLonArrayHash[date]].flatten!
+      else
+          folderHash[date] << no_loc_array
+          folderHash[date].flatten!
+      end
+    end
+  end
+
+  def get_location_file_hash(folderHash)
+      folderNameHash = Hash.new {|h,k| h[k]=[]}
+      folderHash.each do |key, value|
+      firstFile = value[0]
+      puts "fetching location for #{key}"
+      if key.include? ","
+        begin
+          d = @picture_filesHash[firstFile].created_on
+          create_date = d.strftime("%B%d-%Y")
+          if @known_locations.has_key? key
+            shortname = @known_locations[key]
+          else
+            url =  "https://maps.googleapis.com/maps/api/geocode/json?latlng=#{@picture_filesHash[firstFile].lat},-#{@picture_filesHash[firstFile].lon}&key=#{@api_key}"
+            #puts "url=#{url}"
+            response = open(url)
+            shortname = JSON.load(response)['results'][0]['address_components'][1]['short_name']
+          end
+          folderNameHash[create_date+shortname.sub(' ','_')] += value
+        rescue
+          folderNameHash[key] += value
+        end
+      else
+        folderNameHash[key] += value
+      end
+    end
+    folderNameHash
+  end
+
+  # Deprecated
   def sort_files
     folderHash = Hash.new {|h,k| h[k]=[]}
     Dir.chdir(@folder)
@@ -48,36 +139,16 @@ class PicturesSort
     get_location_file_hash(folderHash)
   end
 
-
-  def get_location_file_hash(folderHash)
-      folderNameHash = Hash.new {|h,k| h[k]=[]}
-      puts "folderHash = #{folderHash}"
-      folderHash.each do |key, value|
-      firstFile = value[0]
-      puts "fetching location for #{key}"
-      begin
-        url =  "https://maps.googleapis.com/maps/api/geocode/json?latlng=#{@picture_filesHash[firstFile].lat},-#{@picture_filesHash[firstFile].lon}&key=#{@api_key}"
-        #puts "url=#{url}"
-        response = open(url)
-        shortname = JSON.load(response)['results'][0]['address_components'][1]['short_name']
-      rescue
-        shortname = "no_location"
-      end
-      d = @picture_filesHash[firstFile].created_on
-      create_date = d.strftime("%B%d-%Y")
-      puts "Adding into folderNameHash= #{value}"
-      folderNameHash[create_date+shortname.sub(' ','_')] += value
-    end
-    folderNameHash
-  end
-
-
   def get_exif_data file
     picture_file = PictureFile.new(file)
     exif_data = ExifData.new(file)
     picture_file.lat = exif_data.get_lat
     picture_file.lon = exif_data.get_lon
     picture_file.created_on = exif_data.get_created_date
+    if picture_file.lat == -1
+      @folderUtils.rename_file(file, "NL-#{file.shellescape}")
+      picture_file.name = "NL-#{file}"
+    end
     @picture_filesHash[file] = picture_file
     picture_file
   end
@@ -85,7 +156,7 @@ end
 
 if ARGV.length == 2
   pic_sort = PicturesSort.new(ARGV[0], "MOV,JPG,jpg,MP4,PNG,mp4", ARGV[1])
-  folderNameHash =  pic_sort.sort_files
+  folderNameHash =  pic_sort.sort_files_bylocation
   puts "folderNameHash = #{folderNameHash}"
   folder_util = FolderUtils.new
   folder_util.base_folder = ARGV[0]

@@ -20,6 +20,10 @@ class FolderUtils
     end
   end
 
+  def rename_file(file, newname)
+    FileUtils.mv("#{base_folder}/#{file}", "#{base_folder}/#{newname}")
+  end
+
   def move_file (file, folder)
     FileUtils.mv("#{file.sub('\\','')}", "#{@base_folder}/#{folder}/#{file.sub('\\','')}")
   end
