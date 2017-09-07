@@ -2,9 +2,10 @@ require 'fileutils'
 require 'date'
 
 class ExifData
-  attr_accessor :xif, :date_created, :lat, :lon
+  attr_accessor :xif, :date_created, :lat, :lon, :file
 
   def initialize file
+    @file = file
     read_exif_data file
   end
 
@@ -12,6 +13,7 @@ class ExifData
     if @xif.to_s.empty?
       @xif =  `exiftool -c "%.6f" #{file}`
     end
+  #  puts "file = #{file}: exif =#{@xif}"
     @xif
   end
 
@@ -27,7 +29,12 @@ class ExifData
         end
       end
     end
+   begin
      @date_created =  DateTime.strptime(@date_created.to_s, '%Y:%m:%d %H:%M')
+   rescue
+     @date_created = File.stat(@file).mtime
+   end
+   @date_created
   end
 
   def get_lat_lon
